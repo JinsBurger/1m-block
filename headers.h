@@ -5,7 +5,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-
 #define LIBNET_LIL_ENDIAN 1
 
 #include "./include/libnet/libnet-macros.h"

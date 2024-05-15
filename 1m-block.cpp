@@ -4,17 +4,20 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <libnetfilter_queue/libnetfilter_queue.h>
 #include <linux/types.h>
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <errno.h>
-#include "headers.h"
 #include <string.h>
+#include <unordered_set>
+#include <iostream>
+#include "headers.h"
 
-#include <libnetfilter_queue/libnetfilter_queue.h>
+using namespace std;
 
 
 //https://quat.tistory.com/entry/C-map-%EA%B3%BC-unorderedmap-%EA%B2%80%EC%83%89-%EC%86%8D%EB%8F%84-%EB%B9%84%EA%B5%90
-char * blacklisted_host;
+unordered_set<string> blacklist_hosts;
 
 uint32_t is_http_pkt(char *data, uint32_t data_len) {
 	const char* http_methods[] = {"GET", "POST", "HEAD", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"};
@@ -27,12 +30,30 @@ uint32_t is_http_pkt(char *data, uint32_t data_len) {
 	return -1;
 }
 
+float timedifference_msec(struct timeval t0, struct timeval t1) {
+    return (t1.tv_sec - t0.tv_sec) * 1000.0f + (t1.tv_usec - t0.tv_usec) / 1000.0f;
+}
+
 uint32_t check_blacklisted_host(char *data, uint32_t data_len) {
 	char *line = strtok(data, "\r\n");
 	const char* host_header = "HOST: ";
+	char *host;
+	struct timeval t0;
+   	struct timeval t1;
+
 	while(line != NULL) {
-		if(!strncasecmp(line, host_header, strlen(host_header)) && !strcasecmp(line+strlen(host_header), blacklisted_host)) {
-			return 1;
+		if(!strncasecmp(line, host_header, strlen(host_header))) {
+			host = line + strlen(host_header);
+			
+			gettimeofday(&t0, 0);
+			if(blacklist_hosts.find(string(host)) != blacklist_hosts.end()) {
+				gettimeofday(&t1, 0);
+				printf("COMPARING TIME FOR %s: %f miliseconds \n", host, timedifference_msec(t0, t1));
+
+				return 1;
+			} else {
+				return 0;
+			}	
 		}
 		line = strtok(NULL, "\r\n");
 	}
@@ -75,6 +96,31 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 	return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
 }
 
+void read_bloacklist(char *filename) {
+	FILE *fp;
+	int tmp;
+	char host[0x300];
+	struct timeval t0;
+   	struct timeval t1;
+   	float elapsed;
+
+	if((fp = fopen(filename, "r")) == NULL) {
+		perror("fopen");
+		exit(-1);
+	}
+
+	
+	gettimeofday(&t0, 0);
+	while(1) {
+		if(fscanf(fp, "%d,%s", &tmp, host) != 2)
+			break;
+		blacklist_hosts.insert(string(host));
+	}
+	gettimeofday(&t1, 0);
+
+	printf("DIFF FOR LOADING BLACKLIST: %f milisecons \n", timedifference_msec(t0, t1));
+}
+
 int main(int argc, char **argv)
 {
 	struct nfq_handle *h;
@@ -85,7 +131,7 @@ int main(int argc, char **argv)
 	char buf[4096] __attribute__ ((aligned));
 
 	if(argc < 2) {
-		printf("usage: netfilter-test <host>");
+		printf("usage: 1m-block <site list file>\n");
 		exit(-1);
 	}
 
@@ -124,8 +170,7 @@ int main(int argc, char **argv)
 	fd = nfq_fd(h);
 
 	/* Insert blacklisted host which passed by argument */
-
-	blacklisted_host = strdup(argv[1]);
+	read_bloacklist(argv[1]);
 	
 	for (;;) {
 		//printf("wait packets \n");
@@ -161,8 +206,6 @@ int main(int argc, char **argv)
 	printf("closing library handle\n");
 	nfq_close(h);
 
-
-	free(blacklisted_host);
 	exit(0);
 }
 
