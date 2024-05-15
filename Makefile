@@ -1,12 +1,12 @@
 LDLIBS=-lnetfilter_queue
 CXXFLAGS=-std=c++11
 
-all: netfilter-test
+all: 1m-block
 
-netfilter-test.o: netfilter-test.c 
+netfilter-test.o: 1m-block.c 
 
-netfilter-test: netfilter-test.o
+1m-block: 1m-block.o
 	$(LINK.cc) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
 clean:
-	rm -f netfilter-test *.o *.d
+	rm -f 1m-block *.o *.d
